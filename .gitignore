@@ -1,0 +1,28 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Virtual environments
+vllm-chat-venv/
+venv/
+.env/
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+
+# Jupyter
+.ipynb_checkpoints/
+
+# System-specific files
+.DS_Store
+Thumbs.db
+
+# IDE/editor configurations
+.vscode/
+.idea/
+*.code-workspace
