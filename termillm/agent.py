@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
+from pathlib import Path
 
 from rich import print
 from rich.markdown import Markdown
@@ -266,6 +268,20 @@ class AgentSession:
                 )
                 continue
 
+            if decision.action == "retry":
+                working_messages.append({"role": "assistant", "content": assistant_text})
+                working_messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "Your previous response did not follow the required JSON protocol. "
+                            "Reply with exactly one JSON object. "
+                            "If you need local information, call an appropriate tool."
+                        ),
+                    }
+                )
+                continue
+
             print("[bold magenta]Assistant:[/bold magenta] ", end="")
             print(assistant_text)
             return assistant_text
@@ -281,6 +297,9 @@ class AgentSession:
                 "content": self._agent_system_prompt(),
             }
         ]
+        tool_hint = self._latest_tool_hint()
+        if tool_hint:
+            messages.append({"role": "system", "content": tool_hint})
         messages.extend(self.messages)
         return messages
 
@@ -296,6 +315,8 @@ class AgentSession:
         return (
             "You are TermiLLM operating as a terminal assistant.\n"
             f"{mode_guidance}\n"
+            "If the user asks about the local machine, current directory, files, or project contents, "
+            "do not answer from memory. Use tools to inspect the environment first.\n"
             "Available tools:\n"
             f"{tool_lines}\n\n"
             "You must respond with exactly one JSON object and no extra text.\n"
@@ -313,6 +334,8 @@ class AgentSession:
         try:
             parsed = json.loads(payload)
         except json.JSONDecodeError:
+            if self.mode in {"auto", "agent"}:
+                return AgentDecision(action="retry", content=assistant_text)
             return AgentDecision(action="text", content=assistant_text)
 
         action = parsed.get("action")
@@ -324,6 +347,8 @@ class AgentSession:
             )
         if action == "final":
             return AgentDecision(action="final", content=parsed.get("content", ""))
+        if self.mode in {"auto", "agent"}:
+            return AgentDecision(action="retry", content=assistant_text)
         return AgentDecision(action="text", content=assistant_text)
 
     def _execute_tool(self, tool_name: str, args: dict) -> object:
@@ -336,3 +361,54 @@ class AgentSession:
             return tool.run(**args)
         except TypeError as exc:
             return type("ToolError", (), {"content": f"Invalid arguments for {tool_name}: {exc}"})()
+
+    def _latest_tool_hint(self) -> str:
+        latest_user_message = next(
+            (message["content"] for message in reversed(self.messages) if message["role"] == "user"),
+            "",
+        )
+        lowered = latest_user_message.lower()
+        cwd = Path.cwd()
+
+        if self._looks_like_directory_question(lowered):
+            return (
+                "Tool hint: the user is asking about the current folder or directory contents. "
+                "Call `run_command` with `pwd` and/or `ls -la`. "
+                f"The current working directory for this session is `{cwd}`."
+            )
+
+        file_match = re.search(
+            r"(?:read|open|show|inspect|summarize|explain)\s+(?:the\s+)?file\s+([^\s]+)",
+            latest_user_message,
+            re.IGNORECASE,
+        )
+        if file_match:
+            return (
+                "Tool hint: the user appears to be asking about a specific file. "
+                f"Prefer `read_file` for `{file_match.group(1)}` before answering."
+            )
+
+        if any(keyword in lowered for keyword in {"run ", "execute ", "command ", "shell "}):
+            return (
+                "Tool hint: the user likely expects actual command execution. "
+                "Prefer `run_command` over a purely descriptive answer."
+            )
+
+        return ""
+
+    def _looks_like_directory_question(self, lowered: str) -> bool:
+        patterns = (
+            "this folder",
+            "current folder",
+            "this directory",
+            "current directory",
+            "in this repo",
+            "in this project",
+            "what files",
+            "list files",
+            "what is in",
+            "what's in",
+            "what do i have",
+            "contents of this",
+        )
+        return any(pattern in lowered for pattern in patterns)
