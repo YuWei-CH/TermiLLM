@@ -1,13 +1,32 @@
 # TermiLLM
 A terminal-based LLM chat app that runs locally and interacts with your vLLM server
 
+## Backend Architecture
+TermiLLM is a client. It does not run model inference itself.
+
+The intended design is:
+- TermiLLM runs as a terminal client in its own Python environment
+- The inference backend runs as a separate service
+- The two communicate over HTTP using OpenAI-compatible endpoints such as `/v1/models` and `/v1/chat/completions`
+
+This means you can:
+- Run vLLM in a different local Python environment
+- Run vLLM on another machine and point TermiLLM at it
+- Replace vLLM with another OpenAI-compatible backend later
+
 ## vLLM Integration
-TermiLLM relies on [vLLM](https://github.com/vllm-project/vllm), a high-throughput and memory-efficient inference engine for LLMs. Before using TermiLLM:
+TermiLLM works well with [vLLM](https://github.com/vllm-project/vllm), but vLLM is expected to be started separately from the TermiLLM client. Before using TermiLLM:
 
-1. Install vLLM: `pip install vllm`
-2. Start a vLLM server with your preferred model: `python -m vllm.entrypoints.api_server --model Qwen/Qwen2.5-Coder-3B-Instruct --port 8000`
+1. Install vLLM in a separate environment if needed
+2. Start a vLLM server with your preferred model, for example:
 
-Future versions of TermiLLM will include integrated vLLM support, eliminating the need for a separate server.
+```bash
+python -m vllm.entrypoints.api_server --model Qwen/Qwen2.5-Coder-3B-Instruct --port 8000
+```
+
+For local development, a common setup is:
+- terminal A: activate your `vllm` environment and start the vLLM server on port `8000`
+- terminal B: activate TermiLLM's environment and run `./run.sh`
 
 ## Features
 - **Interactive Chat Interface**: Connect to your local vLLM backend with streaming responses
@@ -32,10 +51,14 @@ source ./venv.sh
 ./run.sh
 ```
 
+By default, TermiLLM connects to `http://localhost:8000`.
+
 You can also specify a different model or server:
 ```bash
 ./run.sh --model Qwen/Qwen2.5-Coder-3B-Instruct --base-url http://localhost:8000
 ```
+
+If your inference service is already running in another local environment or on another machine, only the `base_url` and model name need to match that backend.
 
 ## Configuration
 TermiLLM creates a configuration file named `termillm_config.json` in the application directory that stores your settings. You can edit this file directly to customize your preferences:
