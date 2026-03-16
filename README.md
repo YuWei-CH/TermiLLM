@@ -68,16 +68,16 @@ The following is the plan:
     - [x] Support diff model through vllm
     - [x] Change model use '/model'
     - [x] Save previous model selection
-    - [ ] Check model (backend connection) before start
+    - [x] Check model (backend connection) before start
 - [x] Move setting to JSON
 - [x] Colorful Output: Use rich to make UX more pleasant
 - [ ] ~~Provided more message during generating~~
 - [x] Documentation
 
 ### V 1.0.1 (In Progress)
-- [ ] C++ version
-- [ ] Convert current TermiLLM.py as an engine
-- [ ] Prefer to build a python interface for user and connect to the engine
+- [x] Restructure the Python app into replaceable modules
+- [x] Add a Python MVP agent loop
+- [ ] Add confirmation and safety policy for command execution
 - [ ] Add pytest
 - [ ] CI/CD
 
