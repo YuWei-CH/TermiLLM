@@ -5,6 +5,8 @@ __pycache__/
 *.pyd
 *.so
 
+build/
+
 # Virtual environments
 vllm-chat-venv/
 venv/
