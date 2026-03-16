@@ -11,7 +11,7 @@ CONFIG_FILE = APP_ROOT / "termillm_config.json"
 
 @dataclass
 class AppConfig:
-    model: str = "meta-llama/Llama-3.2-3B-Instruct"
+    model: str = "Qwen/Qwen2.5-Coder-3B-Instruct"
     base_url: str = "http://localhost:8000"
     temperature: float = 0.7
     max_tokens: int = 2048
@@ -32,4 +32,3 @@ class AppConfig:
     def save(self, path: Path = CONFIG_FILE) -> None:
         with path.open("w", encoding="utf-8") as handle:
             json.dump(asdict(self), handle, indent=2)
-

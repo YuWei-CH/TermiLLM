@@ -5,7 +5,7 @@ A terminal-based LLM chat app that runs locally and interacts with your vLLM ser
 TermiLLM relies on [vLLM](https://github.com/vllm-project/vllm), a high-throughput and memory-efficient inference engine for LLMs. Before using TermiLLM:
 
 1. Install vLLM: `pip install vllm`
-2. Start a vLLM server with your preferred model: `python -m vllm.entrypoints.api_server --model meta-llama/Llama-3.2-3B-Instruct --port 8000`
+2. Start a vLLM server with your preferred model: `python -m vllm.entrypoints.api_server --model Qwen/Qwen2.5-Coder-3B-Instruct --port 8000`
 
 Future versions of TermiLLM will include integrated vLLM support, eliminating the need for a separate server.
 
@@ -29,12 +29,12 @@ Future versions of TermiLLM will include integrated vLLM support, eliminating th
 ## Usage
 ```bash
 source ./venv.sh
-python3 TermiLLM.py
+./run.sh
 ```
 
 You can also specify a different model or server:
 ```bash
-python3 TermiLLM.py --model meta-llama/Llama-3.2-3B-Instruct --base-url http://localhost:8000
+./run.sh --model Qwen/Qwen2.5-Coder-3B-Instruct --base-url http://localhost:8000
 ```
 
 ## Configuration
@@ -42,7 +42,7 @@ TermiLLM creates a configuration file named `termillm_config.json` in the applic
 
 ```json
 {
-  "model": "meta-llama/Llama-3.2-3B-Instruct",
+  "model": "Qwen/Qwen2.5-Coder-3B-Instruct",
   "base_url": "http://localhost:8000",
   "temperature": 0.7,
   "max_tokens": 2048
