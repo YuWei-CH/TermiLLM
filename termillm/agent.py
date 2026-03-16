@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from dataclasses import dataclass
+
 from rich import print
 from rich.markdown import Markdown
 
@@ -14,6 +17,7 @@ from termillm.tools.filesystem import ReadFileTool, WriteFileTool
 
 HELP_MARKDOWN = """
 ### Commands:
+- `/mode [chat|auto|agent]`: Change or view the interaction mode
 - `/model <model>`: Change the model (e.g., /model deepseek-ai/deepseek-llm-7b-chat)
 - `/temp <temperature>`: Change the temperature (e.g., /temp 0.5)
 - `/max_tokens <number>`: Change the maximum tokens (e.g., /max_tokens 4096)
@@ -32,23 +36,38 @@ HELP_MARKDOWN = """
 """
 
 
+@dataclass
+class AgentDecision:
+    action: str
+    content: str = ""
+    tool_name: str = ""
+    args: dict | None = None
+
+
 class AgentSession:
     def __init__(self, config: AppConfig, client: ChatModelClient) -> None:
         self.config = config
         self.client = client
+        self.mode = "chat"
         self.messages: list[dict[str, str]] = []
         self.tools = ToolRegistry()
         executor = SubprocessCommandExecutor()
-        self.tools.register("run_command", RunCommandTool(executor))
-        self.tools.register("read_file", ReadFileTool())
-        self.tools.register("write_file", WriteFileTool())
+        self.tools.register(RunCommandTool(executor))
+        self.tools.register(ReadFileTool())
+        self.tools.register(WriteFileTool())
 
     def handle_input(self, user_input: str) -> bool:
         if user_input.startswith("/"):
             return self._handle_command(user_input)
 
         self.messages.append({"role": "user", "content": user_input})
-        response_text = self.client.stream_chat(self.config, self.messages)
+        if self.mode == "chat":
+            response_text = self.client.stream_chat(self.config, self.messages)
+            if response_text:
+                self.messages.append({"role": "assistant", "content": response_text})
+            return False
+
+        response_text = self._run_agent_loop()
         if response_text:
             self.messages.append({"role": "assistant", "content": response_text})
         return False
@@ -67,6 +86,8 @@ class AgentSession:
             self.messages.clear()
             print("[green]Conversation history cleared.[/green]")
             return False
+        if command == "/mode":
+            return self._handle_mode_command(user_input)
         if command == "/file":
             return self._handle_file_command(parts)
         if command == "/model":
@@ -80,6 +101,24 @@ class AgentSession:
             return False
 
         print(f"[yellow]Unknown command: {command}[/yellow]")
+        return False
+
+    def _handle_mode_command(self, user_input: str) -> bool:
+        if user_input.strip() == "/mode":
+            print(f"[cyan]Current mode:[/cyan] {self.mode}")
+            return False
+
+        if not user_input.startswith("/mode "):
+            print("[red]Usage: /mode <chat|auto|agent>[/red]")
+            return False
+
+        new_mode = user_input[len("/mode ") :].strip().lower()
+        if new_mode not in {"chat", "auto", "agent"}:
+            print("[red]Usage: /mode <chat|auto|agent>[/red]")
+            return False
+
+        self.mode = new_mode
+        print(f"[cyan]Mode set to:[/cyan] {self.mode}")
         return False
 
     def _handle_file_command(self, parts: list[str]) -> bool:
@@ -187,6 +226,7 @@ class AgentSession:
             Markdown(
                 f"""
 ### Current Settings:
+- **Mode**: {self.mode}
 - **Model**: {self.config.model}
 - **Server URL**: {self.config.base_url}
 - **Temperature**: {self.config.temperature}
@@ -195,3 +235,104 @@ class AgentSession:
             )
         )
 
+    def _run_agent_loop(self, max_steps: int = 5) -> str:
+        working_messages = self._build_agent_messages()
+        for _ in range(max_steps):
+            assistant_text = self.client.complete(self.config, working_messages)
+            if not assistant_text:
+                return ""
+
+            decision = self._parse_agent_response(assistant_text)
+            if decision.action == "final":
+                print("[bold magenta]Assistant:[/bold magenta] ", end="")
+                print(decision.content)
+                return decision.content
+
+            if decision.action == "tool":
+                tool_result = self._execute_tool(decision.tool_name, decision.args or {})
+                print(f"[dim]Tool {decision.tool_name} result:[/dim]")
+                print(tool_result.content)
+                working_messages.append({"role": "assistant", "content": assistant_text})
+                working_messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Tool result for `{decision.tool_name}`:\n"
+                            f"{tool_result.content}\n"
+                            "Continue and either call another tool or provide the final answer "
+                            "using the required JSON response format."
+                        ),
+                    }
+                )
+                continue
+
+            print("[bold magenta]Assistant:[/bold magenta] ", end="")
+            print(assistant_text)
+            return assistant_text
+
+        timeout_message = "Agent stopped after reaching the maximum tool steps."
+        print(f"[yellow]{timeout_message}[/yellow]")
+        return timeout_message
+
+    def _build_agent_messages(self) -> list[dict[str, str]]:
+        messages = [
+            {
+                "role": "system",
+                "content": self._agent_system_prompt(),
+            }
+        ]
+        messages.extend(self.messages)
+        return messages
+
+    def _agent_system_prompt(self) -> str:
+        mode_guidance = {
+            "auto": "Use tools only when they are necessary to answer correctly.",
+            "agent": "Prefer tools whenever they would improve confidence or gather facts.",
+        }.get(self.mode, "Answer normally.")
+        tool_lines = "\n".join(
+            f"- {item['name']}: {item['description']} | schema: {json.dumps(item['schema'], ensure_ascii=True)}"
+            for item in self.tools.definitions()
+        )
+        return (
+            "You are TermiLLM operating as a terminal assistant.\n"
+            f"{mode_guidance}\n"
+            "Available tools:\n"
+            f"{tool_lines}\n\n"
+            "You must respond with exactly one JSON object and no extra text.\n"
+            'For a tool call use: {"action":"tool","tool":"tool_name","args":{...}}\n'
+            'For the final answer use: {"action":"final","content":"..."}'
+        )
+
+    def _parse_agent_response(self, assistant_text: str) -> AgentDecision:
+        payload = assistant_text.strip()
+        if payload.startswith("```json") and payload.endswith("```"):
+            payload = payload[len("```json") : -3].strip()
+        elif payload.startswith("```") and payload.endswith("```"):
+            payload = payload[3:-3].strip()
+
+        try:
+            parsed = json.loads(payload)
+        except json.JSONDecodeError:
+            return AgentDecision(action="text", content=assistant_text)
+
+        action = parsed.get("action")
+        if action == "tool":
+            return AgentDecision(
+                action="tool",
+                tool_name=parsed.get("tool", ""),
+                args=parsed.get("args") or {},
+            )
+        if action == "final":
+            return AgentDecision(action="final", content=parsed.get("content", ""))
+        return AgentDecision(action="text", content=assistant_text)
+
+    def _execute_tool(self, tool_name: str, args: dict) -> object:
+        try:
+            tool = self.tools.get(tool_name)
+        except KeyError:
+            return type("ToolError", (), {"content": f"Unknown tool: {tool_name}"})()
+
+        try:
+            return tool.run(**args)
+        except TypeError as exc:
+            return type("ToolError", (), {"content": f"Invalid arguments for {tool_name}: {exc}"})()

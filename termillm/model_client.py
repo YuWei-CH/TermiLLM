@@ -136,3 +136,22 @@ class ChatModelClient:
             print(f"[bold red]Request failed:[/bold red] {exc}")
             return ""
 
+    def complete(self, config: AppConfig, messages: list[dict[str, str]]) -> str:
+        url = f"{config.base_url}/v1/chat/completions"
+        headers = {"Content-Type": "application/json"}
+        payload = {
+            "model": config.model,
+            "messages": messages,
+            "temperature": config.temperature,
+            "max_tokens": config.max_tokens,
+            "stream": False,
+        }
+
+        try:
+            response = requests.post(url, headers=headers, json=payload, timeout=60)
+            response.raise_for_status()
+            data = response.json()
+            return data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        except requests.exceptions.RequestException as exc:
+            print(f"[bold red]Request failed:[/bold red] {exc}")
+            return ""
